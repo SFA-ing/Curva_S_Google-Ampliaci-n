@@ -1,0 +1,9 @@
+{
+  "scriptId": "REEMPLAZAR_CON_SCRIPT_ID_DEL_PROYECTO",
+  "rootDir": "",
+  "scriptExtensions": [".js", ".gs"],
+  "htmlExtensions": [".html"],
+  "jsonExtensions": [".json"],
+  "filePushOrder": [],
+  "skipSubdirectories": false
+}

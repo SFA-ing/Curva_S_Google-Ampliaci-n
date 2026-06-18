@@ -353,6 +353,7 @@ function getDashboardData(cutMondayISO) {
 
   // Tablas
   const stageSummary    = construirResumenPorEtapa_(shPlan, shHH, metrosByEtapa, taskMeta, denom, byTaskCut, cutMonday);
+  const personalSummary = construirResumenPorPersonal_(shPlan, shHH, taskMeta, denom, byTaskCut, cutMonday);
   const activitySummary = construirResumenPorActividad_(shPlan, shHH, taskMeta, denom, byTaskCut, cutMonday);
   const taskTable       = construirTablaTareasV2_(shPlan, cutMonday, taskMeta, byTaskCut);
 
@@ -398,6 +399,7 @@ function getDashboardData(cutMondayISO) {
   trendSeries,
   proyecciones,
   stageSummary,
+  personalSummary,
   activitySummary,
   taskTable,
   rendimientosCruzados: construirTablaRendimientosCruzados_(taskMeta, byTaskCut),
@@ -547,6 +549,59 @@ function construirResumenPorEtapa_(shPlan, shHH, metrosByEtapa, taskMeta, denom,
       pctHH,
       pctRealEtapa,
       pctPlanEtapa,
+      { plan: rendPlan, real: rendReal },
+    ]);
+  }
+
+  return rows;
+}
+
+// ============================================================
+//  RESUMEN POR PERSONAL (al corte)  —  INGENER vs Subcontrato
+// ============================================================
+
+/**
+ * Mismas métricas que el resumen por etapa pero agrupando por la
+ * columna "Personal" (INGENER / Subcontrato). El rendimiento se
+ * expresa en HH por cada 1% de avance físico (HH/%), igual que los
+ * KPIs globales: rendReal = HH reales al corte / (% real * 100) y
+ * rendPlan = HH plan totales del grupo / 100.
+ */
+function construirResumenPorPersonal_(shPlan, shHH, taskMeta, denom, byTaskCut, cutMonday) {
+  const hhRealByWeekPers = sumaPorSemanaGrupo_(shHH, "SEMANAS.WEEK_KEY", "Personal", "Valor");
+
+  const qtyPlanCutByTask = sumaHastaCortePorTarea_(shPlan, cutMonday, "Avance Real");
+
+  const qtyRealCutByTask = {};
+  for (const [k, v] of Object.entries(byTaskCut)) {
+    qtyRealCutByTask[k] = Number(v.qtyReal || 0);
+  }
+
+  const personas = Object.keys(denom.byPersonal || {}).sort((a, b) => a.localeCompare(b));
+
+  const rows = [];
+  rows.push(["PERSONAL", "HH (corte / total)", "% Avance HH", "% Avance Real", "% Avance Plan", "Rend. Real / Plan"]);
+
+  for (const persona of personas) {
+    const hhR        = hhAcumGrupoHastaCorte_(hhRealByWeekPers, persona, cutMonday);
+    const denomPers  = denom.byPersonal[persona] || 0;
+
+    const pctPlan = denomPers > 0 ? pctFisicoGrupoDesdeQty_(taskMeta, "personal", persona, denomPers, qtyPlanCutByTask) : null;
+    const pctReal = denomPers > 0 ? pctFisicoGrupoDesdeQty_(taskMeta, "personal", persona, denomPers, qtyRealCutByTask) : null;
+
+    const hhCell   = denomPers > 0 ? { r: hhR, t: denomPers } : null;
+    const pctHH    = denomPers > 0 ? hhR / denomPers          : null;
+    const rendReal = (pctReal != null && pctReal > 0) ? hhR / (pctReal * 100) : null;
+    const rendPlan = denomPers > 0 ? denomPers / 100         : null;
+
+    const label = (denom.personalLabel && denom.personalLabel[persona]) || persona;
+
+    rows.push([
+      label,
+      hhCell,
+      pctHH,
+      pctReal,
+      pctPlan,
       { plan: rendPlan, real: rendReal },
     ]);
   }
@@ -713,6 +768,7 @@ function construirTaskMeta_(shPlan) {
   const iHH   = h.indexOf("HH TOTALES");
   const iRend = h.indexOf("Rendimiento Teorico");
   const iUni  = h.indexOf("Unidad");   // nueva: unidad de medida
+  const iPer  = h.indexOf("Personal"); // INGENER / Subcontrato
 
   if (iEta === -1 || iAct === -1 || iTar === -1 || iQty === -1 || iHH === -1) {
     throw new Error('En "Planificación Inicial" faltan: ETAPA, ACTIVIDAD, TAREA, Cantidad Teórica, HH TOTALES.');
@@ -739,7 +795,9 @@ function construirTaskMeta_(shPlan) {
       if (qtyPlan > 0 && rend > 0) hhPlan = qtyPlan * rend;
     }
 
-    const unidad = (iUni !== -1) ? String(v[r][iUni] || "").trim() : "";
+    const unidad   = (iUni !== -1) ? String(v[r][iUni] || "").trim() : "";
+    const personal = (iPer !== -1) ? normalizeKey_(v[r][iPer]) : "";
+    const personalOrig = (iPer !== -1) ? String(v[r][iPer] || "").trim() : "";
 
     if (!map[key]) {
       map[key] = {
@@ -750,6 +808,8 @@ function construirTaskMeta_(shPlan) {
         tarea        : tar,
         tareaOrig    : String(v[r][iTar] || "").trim(),
         unidad,
+        personal,
+        personalOrig,
         qtyPlan      : qtyPlan || 0,
         hhPlan       : hhPlan  || 0,
         rendPlan     : null
@@ -758,6 +818,7 @@ function construirTaskMeta_(shPlan) {
       if ((qtyPlan || 0) > map[key].qtyPlan) map[key].qtyPlan = qtyPlan || 0;
       if ((hhPlan  || 0) > map[key].hhPlan)  map[key].hhPlan  = hhPlan  || 0;
       if (!map[key].unidad && unidad) map[key].unidad = unidad;
+      if (!map[key].personal && personal) { map[key].personal = personal; map[key].personalOrig = personalOrig; }
     }
     map[key].rendPlan = (map[key].qtyPlan > 0) ? (map[key].hhPlan / map[key].qtyPlan) : null;
   }
@@ -976,14 +1037,20 @@ function construirDenominadores_(taskMeta) {
   let globalHH = 0;
   const byEtapa = {};
   const byAct  = {};
+  const byPersonal = {};
+  const personalLabel = {}; // clave normalizada → etiqueta original (INGENER, Subcontrato)
   for (const m of Object.values(taskMeta)) {
     if ((m.qtyPlan || 0) > 0 && (m.hhPlan || 0) > 0) {
       globalHH += m.hhPlan;
       byEtapa[m.etapa] = (byEtapa[m.etapa] || 0) + m.hhPlan;
       byAct[m.actividad] = (byAct[m.actividad] || 0) + m.hhPlan;
+      if (m.personal) {
+        byPersonal[m.personal] = (byPersonal[m.personal] || 0) + m.hhPlan;
+        if (!personalLabel[m.personal]) personalLabel[m.personal] = m.personalOrig || m.personal;
+      }
     }
   }
-  return { globalHH, byEtapa, byAct };
+  return { globalHH, byEtapa, byAct, byPersonal, personalLabel };
 }
 
 function pctFisicoGrupoDesdeQty_(taskMeta, propName, groupValue, denomGroupHH, cumQtyMap) {

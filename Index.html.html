@@ -592,6 +592,18 @@
         </div>
       </div>
 
+      <div class="panel">
+        <div class="headerRow">
+          <div>
+            <div class="panel-title">Resumen por Personal (al corte)</div>
+            <div class="panel-sub" style="margin-bottom:0;">Ingeniería vs Subcontrato.</div>
+          </div>
+        </div>
+        <div class="tableWrap wrapAct">
+          <table id="personalTable"></table>
+        </div>
+      </div>
+
       <div class="panel collapsed" id="panelRend">
         <div class="panel-toggle-header" onclick="togglePanel('panelRend')">
           <div>
@@ -1339,6 +1351,43 @@
       tr.style.cssText='border-top:2px solid #94a3b8;font-weight:700;background:#f1f5f9;';
       tr.innerHTML=`<td>Total cañería</td><td>${fmtNumber(mR,0)} m / ${fmtNumber(mT,0)} m</td><td colspan="5"></td>`;
     })();
+
+    // ── Resumen por Personal (INGENER vs Subcontrato) ──
+    const personalSummary = res.personalSummary || [["PERSONAL","HH (corte / total)","% Avance HH","% Avance Real","% Avance Plan","Rend. Real / Plan"]];
+    const personalSorted = (function(){
+      const h = personalSummary[0], b = personalSummary.slice(1);
+      // Col 1 = hhCell {r, t} → ordenar por HH real (r) descendente
+      b.sort((a, b2) => {
+        const va = a[1] && typeof a[1]==='object' ? (a[1].r||0) : 0;
+        const vb = b2[1] && typeof b2[1]==='object' ? (b2[1].r||0) : 0;
+        return vb - va;
+      });
+      return [h, ...b];
+    })();
+    renderTable("personalTable", personalSorted, [
+      // Col 0: PERSONAL
+      x => x,
+      // Col 1: HH (corte / total)
+      x => { if(!x||typeof x!=='object') return '-'; return `${fmtNumber(x.r,0)} / ${fmtNumber(x.t,0)} HH`; },
+      // Col 2: % Avance HH
+      x => x==null ? '-' : fmtPct(x, 1),
+      // Col 3: % Avance Real (verde si ≥ Plan, rojo si <)
+      (x, row) => {
+        if(x==null) return '-';
+        const plan = row[4];
+        const cls = (plan==null || x >= plan) ? 'c-pos' : 'c-neg';
+        return `<span class="${cls}">${fmtPct(x,2)}</span>`;
+      },
+      // Col 4: % Avance Plan
+      x => x==null ? '-' : fmtPct(x, 2),
+      // Col 5: Rend. Real / Plan (HH por cada 1% de avance)
+      x => {
+        if(!x||typeof x!=='object') return '-';
+        const rr = x.real!=null ? fmtNumber(x.real,0)+' HH/%' : '-';
+        const rp = x.plan!=null ? fmtNumber(x.plan,0)+' HH/%' : '-';
+        return `<span style="color:#0f172a;font-weight:600">${rr}</span> / <span style="color:#475569">${rp}</span>`;
+      },
+    ]);
 
     renderTable("actTable", FULL_ACT_TABLE, [
       x=>x,

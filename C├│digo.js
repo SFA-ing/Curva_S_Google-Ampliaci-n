@@ -404,6 +404,7 @@ function getDashboardData(cutMondayISO, personalFilter) {
     metrosTotalPlan,
     metrosTotalReal,
     hhTotalPlanExcel,
+    hhPlanTotal,          // denom.globalHH: mismo total que usan las tablas (HH TOTALES del LB)
     hhPlanAcFinal,
     mainUnit: MAIN_UNIT   // etiquetas del proyecto para el frontend
   };

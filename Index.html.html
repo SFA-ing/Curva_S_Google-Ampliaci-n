@@ -890,8 +890,9 @@
 
     // HH Totales Proyectadas:
     // Real    = HH gastadas + pendiente al rendimiento actual → ¿cuánto costará si sigo igual?
-    // Teórico = total HH presupuestadas en el Excel (plan de línea base)
-    const hhPlanExcel   = Number(k.hhPlanAcFinal||0) || Number(k.hhTotalPlanExcel||0) || (hhR + hhPT);
+    // Teórico = total HH presupuestadas en el LB (columna "HH TOTALES"), el mismo
+    //           total que suman las tablas Resumen por etapa / por Personal.
+    const hhPlanExcel   = Number(k.hhPlanTotal||0) || Number(k.hhPlanAcFinal||0) || Number(k.hhTotalPlanExcel||0) || (hhR + hhPT);
     const hhTotProyReal = hhR  + hhPRe;
     const hhTotProyTeor = hhPlanExcel;
     const hhTotDiff     = hhTotProyReal - hhTotProyTeor;

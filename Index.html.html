@@ -122,6 +122,10 @@
     #stageTable tbody tr:hover{ background:#f8fafc; }
     #stageTable tbody tr.selected{ background:#eff6ff; outline:2px solid #3b82f6; outline-offset:-2px; }
 
+    #personalTable tbody tr{ cursor:pointer; transition:background .1s; }
+    #personalTable tbody tr:hover{ background:#f8fafc; }
+    #personalTable tbody tr.selected{ background:#eff6ff; outline:2px solid #3b82f6; outline-offset:-2px; }
+
     /* ── PANELES DESPLEGABLES ── */
     .panel-toggle-header{
       display:flex; align-items:flex-start; justify-content:space-between;
@@ -516,6 +520,9 @@
           <span id="corte">Cargando…</span>
         </div>
 
+        <!-- Banner de filtro por Personal (se muestra al seleccionar) -->
+        <div id="personalFilterBanner" style="display:none;align-items:center;justify-content:space-between;gap:8px;margin:8px 0 0;padding:8px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:12px;color:#1e3a8a;"></div>
+
         <!-- Barras resumen -->
         <div class="summary-bars" id="summaryBars">
           <!-- se llena por JS -->
@@ -604,36 +611,6 @@
         </div>
       </div>
 
-      <div class="panel collapsed" id="panelRend">
-        <div class="panel-toggle-header" onclick="togglePanel('panelRend')">
-          <div>
-            <div class="panel-title">Rendimientos por tarea y sector</div>
-            <div class="panel-sub" style="margin-bottom:0;">HH/unidad real vs teórico por etapa. Naranja = peor que el plan.</div>
-          </div>
-          <span class="panel-chevron">▼</span>
-        </div>
-        <div class="panel-body" style="margin-top:12px;">
-          <div class="tableWrap" style="overflow-x:auto;">
-            <table id="rendCruzTable"></table>
-          </div>
-        </div>
-      </div>
-
-      <div class="panel collapsed" id="panelSistema">
-        <div class="panel-toggle-header" onclick="togglePanel('panelSistema')">
-          <div>
-            <div class="panel-title">Avance por Sistema y Tarea</div>
-            <div class="panel-sub" style="margin-bottom:0;">% avance físico real por sistema para las 4 tareas clave.</div>
-          </div>
-          <span class="panel-chevron">▼</span>
-        </div>
-        <div class="panel-body" style="margin-top:12px;">
-          <div class="tableWrap" style="overflow-x:auto;">
-            <table id="sistemaTable"></table>
-          </div>
-        </div>
-      </div>
-
       <div class="panel collapsed" id="panelAct">
         <div class="panel-toggle-header" onclick="togglePanel('panelAct')">
           <div>
@@ -676,6 +653,9 @@
   let FULL_TASK_TABLE = null;
   let FULL_ACT_TABLE  = null;
   let SELECTED_ACT    = null;
+
+  // ── Filtro global por Personal (INGENER / Subcontrato / …) ──
+  let ACTIVE_PERSONAL = null;  // etiqueta del personal seleccionado o null
 
   // ── Selector de corte (cierre semanal) ──
   // Hoy es lunes → "Hasta el lunes pasado" trae datos hasta esa semana,
@@ -1230,7 +1210,7 @@
   }
 
   // ── PANELES DESPLEGABLES ──
-  const COLLAPSIBLE_PANELS = ['panelRend','panelSistema','panelAct','panelTask'];
+  const COLLAPSIBLE_PANELS = ['panelAct','panelTask'];
 
   function togglePanel(id){
     const el = document.getElementById(id);
@@ -1338,8 +1318,7 @@
         const rp = x.plan!=null ? fmtNumber(x.plan,2)+' HH/m' : '-';
         return `<span style="color:#0f172a;font-weight:600">${rr}</span> / <span style="color:#475569">${rp}</span>`;
       },
-    ], null, (row) => `data-etapa="${(row[0]||'').replace(/"/g,'&quot;')}"`);
-    wireStageTableClick();
+    ]);
     // Fila de totales de cañería (metros)
     (function(){
       let mT=0, mR=0, has=false;
@@ -1352,10 +1331,14 @@
       tr.innerHTML=`<td>Total cañería</td><td>${fmtNumber(mR,0)} m / ${fmtNumber(mT,0)} m</td><td colspan="5"></td>`;
     })();
 
-    // ── Resumen por Personal (INGENER vs Subcontrato) ──
-    const personalSummary = res.personalSummary || [["PERSONAL","HH (corte / total)","% Avance HH","% Avance Real","% Avance Plan","Rend. Real / Plan"]];
+    // ── Resumen por Personal (INGENER vs Subcontrato) — filtro global ──
+    // El backend siempre devuelve TODOS los personales (al corte vigente),
+    // aunque el resto del tablero esté filtrado, para poder cambiar de
+    // selección. La fila activa se resalta y filtra todo el tablero.
+    const personalSource = res.personalSummary
+      || [["PERSONAL","HH (corte / total)","% Avance HH","% Avance Real","% Avance Plan","Rend. Real / Plan"]];
     const personalSorted = (function(){
-      const h = personalSummary[0], b = personalSummary.slice(1);
+      const h = personalSource[0], b = personalSource.slice(1);
       // Col 1 = hhCell {r, t} → ordenar por HH real (r) descendente
       b.sort((a, b2) => {
         const va = a[1] && typeof a[1]==='object' ? (a[1].r||0) : 0;
@@ -1387,7 +1370,12 @@
         const rp = x.plan!=null ? fmtNumber(x.plan,0)+' HH/%' : '-';
         return `<span style="color:#0f172a;font-weight:600">${rr}</span> / <span style="color:#475569">${rp}</span>`;
       },
-    ]);
+    ],
+      (row) => (ACTIVE_PERSONAL && String(row[0]) === ACTIVE_PERSONAL) ? 'selected' : '',
+      (row) => `data-personal="${String(row[0]||'').replace(/"/g,'&quot;')}"`
+    );
+    wirePersonalSelection();
+    updatePersonalFilterBanner();
 
     renderTable("actTable", FULL_ACT_TABLE, [
       x=>x,
@@ -1401,8 +1389,48 @@
     wireActivitySelection();
     clearActivityFilter();
     renderTaskTableFiltered();
-    renderRendimientosCruzados(res.rendimientosCruzados);
-    renderAvancePorSistema(res.avancePorSistema);
+  }
+
+  // ── Selección de Personal: filtra TODO el tablero ──
+  function wirePersonalSelection(){
+    const tbl = document.getElementById("personalTable");
+    if(!tbl) return;
+    const tbody = tbl.querySelector("tbody");
+    if(!tbody) return;
+    tbody.querySelectorAll("tr").forEach(tr=>{
+      tr.style.cursor = "pointer";
+      tr.addEventListener("click", ()=>{
+        const label = tr.dataset.personal || (tr.querySelector("td")?.textContent || "").trim();
+        if(!label) return;
+        selectPersonal(label);
+      });
+    });
+  }
+
+  function selectPersonal(label){
+    // Toggle: clic sobre el ya seleccionado → quita el filtro
+    ACTIVE_PERSONAL = (ACTIVE_PERSONAL === label) ? null : label;
+    load();
+  }
+
+  function clearPersonalFilter(){
+    if(ACTIVE_PERSONAL === null) return;
+    ACTIVE_PERSONAL = null;
+    load();
+  }
+
+  function updatePersonalFilterBanner(){
+    const el = document.getElementById("personalFilterBanner");
+    if(!el) return;
+    if(ACTIVE_PERSONAL){
+      el.style.display = "flex";
+      el.innerHTML =
+        `<span>Tablero filtrado por: <strong>${ACTIVE_PERSONAL}</strong></span>` +
+        `<button class="miniBtn" onclick="clearPersonalFilter()">✕ Ver todo</button>`;
+    } else {
+      el.style.display = "none";
+      el.innerHTML = "";
+    }
   }
 
   let SISTEMA_DATA = null;
@@ -1564,7 +1592,7 @@
       google.script.run
         .withSuccessHandler(res=>{ handleData(res); btn.disabled=false; })
         .withFailureHandler(err=>{ document.getElementById("meta").textContent="Error"; btn.disabled=false; alert(err.message||err); })
-        .getDashboardData(SELECTED_CUT_ISO);
+        .getDashboardData(SELECTED_CUT_ISO, ACTIVE_PERSONAL);
     } else {
       // Modo preview standalone: datos de ejemplo para visualizar el diseño
       setTimeout(()=>{

@@ -134,15 +134,30 @@ function onOpen() {
 // ------------------------------------------------------------
 //  ENTRY POINT PRINCIPAL
 // ------------------------------------------------------------
-function getDashboardData(cutMondayISO) {
+function getDashboardData(cutMondayISO, personalFilter) {
   const ss = SpreadsheetApp.getActive();
 
-  const shPlan = ss.getSheetByName(DEST_PLAN_SHEET_NAME);
-  const shHH   = ss.getSheetByName(DEST_REAL_HH_SHEET_NAME);
-  const shQty  = ss.getSheetByName(DEST_REAL_CANT_SHEET_NAME);
+  let shPlan = ss.getSheetByName(DEST_PLAN_SHEET_NAME);
+  let shHH   = ss.getSheetByName(DEST_REAL_HH_SHEET_NAME);
+  let shQty  = ss.getSheetByName(DEST_REAL_CANT_SHEET_NAME);
 
   if (!shPlan || !shHH || !shQty) {
     throw new Error('Faltan hojas. Deben existir: "Planificación Inicial", "AVANCE_HH_REAL (2)", "AVANCE_REAL_CANT (2)".');
+  }
+
+  // Referencias sin filtrar: el selector "Resumen por Personal" siempre se
+  // calcula sobre TODOS los personales (al corte vigente), aunque el resto
+  // del tablero esté filtrado, para poder cambiar de selección.
+  const shPlanRaw = shPlan, shHHRaw = shHH, shQtyRaw = shQty;
+
+  // Filtro por Personal (INGENER / Subcontrato / …): si el front manda un
+  // valor, envolvemos cada hoja en un proxy que sólo expone las filas de
+  // ese personal. Todo el cómputo (KPIs, curva, tablas) queda filtrado.
+  const personalNorm = personalFilter ? normalizeKey_(personalFilter) : "";
+  if (personalNorm) {
+    shPlan = filtrarHojaPorPersonal_(shPlan, personalNorm);
+    shHH   = filtrarHojaPorPersonal_(shHH,   personalNorm);
+    shQty  = filtrarHojaPorPersonal_(shQty,  personalNorm);
   }
 
   // Corte: si el front lo manda (ISO YYYY-MM-DD), lo respetamos llevándolo
@@ -353,8 +368,15 @@ function getDashboardData(cutMondayISO) {
 
   // Tablas
   const stageSummary    = construirResumenPorEtapa_(shPlan, shHH, metrosByEtapa, taskMeta, denom, byTaskCut, cutMonday);
-  const personalSummary = construirResumenPorPersonal_(shPlan, shHH, taskMeta, denom, byTaskCut, cutMonday);
   const activitySummary = construirResumenPorActividad_(shPlan, shHH, taskMeta, denom, byTaskCut, cutMonday);
+
+  // "Resumen por Personal": siempre sobre datos sin filtrar (selector global).
+  // Sin filtro reutilizamos los cómputos ya hechos; con filtro recalculamos
+  // las metas/denominadores/corte sobre las hojas crudas.
+  const taskMetaRaw  = personalNorm ? construirTaskMeta_(shPlanRaw) : taskMeta;
+  const denomRaw     = personalNorm ? construirDenominadores_(taskMetaRaw) : denom;
+  const byTaskCutRaw = personalNorm ? construirCortePorTarea_(shHHRaw, shQtyRaw, taskMetaRaw, cutMonday) : byTaskCut;
+  const personalSummary = construirResumenPorPersonal_(shPlanRaw, shHHRaw, taskMetaRaw, denomRaw, byTaskCutRaw, cutMonday);
   const taskTable       = construirTablaTareasV2_(shPlan, cutMonday, taskMeta, byTaskCut);
 
   // Total HH plan de TODAS las tareas (incluyendo las sin cantidad física)
@@ -1498,6 +1520,33 @@ function normalizeKey_(x) {
     .replace(/\s+/g, " ")    // múltiples espacios → uno
     .trim()
     .toLowerCase();
+}
+
+/**
+ * Devuelve un proxy de hoja que sólo expone las filas cuyo valor en la
+ * columna "Personal" coincide (normalizado) con personalNorm. Mantiene la
+ * misma interfaz mínima que usan los lectores: getName() y
+ * getDataRange().getValues(). Si la hoja no tiene columna "Personal",
+ * devuelve la hoja original sin filtrar.
+ */
+function filtrarHojaPorPersonal_(sheet, personalNorm) {
+  const values  = sheet.getDataRange().getValues();
+  const headers = (values[0] || []).map(String);
+  const iPer    = headers.indexOf("Personal");
+  if (iPer === -1) return sheet; // sin columna Personal → no se filtra
+
+  const filtered = [values[0]];
+  for (let r = 1; r < values.length; r++) {
+    if (normalizeKey_(values[r][iPer]) === personalNorm) filtered.push(values[r]);
+  }
+
+  const name = sheet.getName();
+  return {
+    getName: function () { return name; },
+    getDataRange: function () {
+      return { getValues: function () { return filtered; } };
+    }
+  };
 }
 
 function toNumBack_(x) {

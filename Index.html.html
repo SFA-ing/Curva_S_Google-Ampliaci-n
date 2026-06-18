@@ -590,24 +590,24 @@
       <div class="panel">
         <div class="headerRow">
           <div>
-            <div class="panel-title">Resumen por etapa (al corte)</div>
-            <div class="panel-sub" style="margin-bottom:0;">Vista macro del avance por etapa.</div>
-          </div>
-        </div>
-        <div class="tableWrap wrapAct">
-          <table id="stageTable"></table>
-        </div>
-      </div>
-
-      <div class="panel">
-        <div class="headerRow">
-          <div>
             <div class="panel-title">Resumen por Personal (al corte)</div>
             <div class="panel-sub" style="margin-bottom:0;">Ingeniería vs Subcontrato.</div>
           </div>
         </div>
         <div class="tableWrap wrapAct">
           <table id="personalTable"></table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="headerRow">
+          <div>
+            <div class="panel-title">Resumen por etapa (al corte)</div>
+            <div class="panel-sub" style="margin-bottom:0;">Vista macro del avance por etapa.</div>
+          </div>
+        </div>
+        <div class="tableWrap wrapAct">
+          <table id="stageTable"></table>
         </div>
       </div>
 
@@ -1291,27 +1291,34 @@
     FULL_TASK_TABLE=res.taskTable;
     FULL_ACT_TABLE=sortByHHRealDesc(res.activitySummary);
 
-    const stageSummary = res.stageSummary || [["ETAPA","m (corte / total)","HH (corte / total)","% Avance HH","% Avance Real","% Avance Plan","Rend. Real / Plan"]];
-    const stageSorted = sortByHHRealDesc(stageSummary);
+    const stageSummary = res.stageSummary || [["ETAPA","HH (corte / total)","% Avance HH","% Avance Real","% Avance Plan","Rend. Real / Plan"]];
+    const stageSorted = (function(){
+      const h = stageSummary[0], b = stageSummary.slice(1);
+      // Col 1 = hhCell {r, t} → ordenar por HH real (r) descendente
+      b.sort((a, b2) => {
+        const va = a[1] && typeof a[1]==='object' ? (a[1].r||0) : 0;
+        const vb = b2[1] && typeof b2[1]==='object' ? (b2[1].r||0) : 0;
+        return vb - va;
+      });
+      return [h, ...b];
+    })();
     renderTable("stageTable", stageSorted, [
       // Col 0: ETAPA
       x => x,
-      // Col 1: M (corte / total)
-      x => { if(!x||typeof x!=='object') return '-'; return `${fmtNumber(x.r,0)} m / ${fmtNumber(x.t,0)} m`; },
-      // Col 2: HH (corte / total)
+      // Col 1: HH (corte / total)
       x => { if(!x||typeof x!=='object') return '-'; return `${fmtNumber(x.r,0)} / ${fmtNumber(x.t,0)} HH`; },
-      // Col 3: % Avance HH
+      // Col 2: % Avance HH
       x => x==null ? '-' : fmtPct(x, 1),
-      // Col 4: % Avance Real (verde si ≥ Plan, rojo si <)
+      // Col 3: % Avance Real (verde si ≥ Plan, rojo si <)
       (x, row) => {
         if(x==null) return '-';
-        const plan = row[5];
+        const plan = row[4];
         const cls = (plan==null || x >= plan) ? 'c-pos' : 'c-neg';
         return `<span class="${cls}">${fmtPct(x,2)}</span>`;
       },
-      // Col 5: % Avance Plan
+      // Col 4: % Avance Plan
       x => x==null ? '-' : fmtPct(x, 2),
-      // Col 6: Rend. Real / Plan
+      // Col 5: Rend. Real / Plan
       x => {
         if(!x||typeof x!=='object') return '-';
         const rr = x.real!=null ? fmtNumber(x.real,2)+' HH/m' : '-';
@@ -1319,17 +1326,6 @@
         return `<span style="color:#0f172a;font-weight:600">${rr}</span> / <span style="color:#475569">${rp}</span>`;
       },
     ]);
-    // Fila de totales de cañería (metros)
-    (function(){
-      let mT=0, mR=0, has=false;
-      stageSorted.slice(1).forEach(row=>{ const m=row[1]; if(m&&typeof m==='object'){mT+=m.t||0;mR+=m.r||0;has=true;} });
-      if(!has) return;
-      const tbl = document.getElementById("stageTable");
-      const tf = tbl.createTFoot();
-      const tr = tf.insertRow();
-      tr.style.cssText='border-top:2px solid #94a3b8;font-weight:700;background:#f1f5f9;';
-      tr.innerHTML=`<td>Total cañería</td><td>${fmtNumber(mR,0)} m / ${fmtNumber(mT,0)} m</td><td colspan="5"></td>`;
-    })();
 
     // ── Resumen por Personal (INGENER vs Subcontrato) — filtro global ──
     // El backend siempre devuelve TODOS los personales (al corte vigente),
